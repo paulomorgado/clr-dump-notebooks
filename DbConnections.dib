@@ -1,0 +1,41 @@
+#!meta
+
+{"kernelInfo":{"defaultKernelName":"csharp","items":[{"aliases":[],"languageName":"csharp","name":"csharp"}]}}
+
+#!csharp
+
+#r "nuget: Microsoft.Diagnostics.Runtime, 3.0.0-beta.23165.1"
+
+#!import ClrMdExtensions.csx
+#!import DataAccess.csx
+
+using Microsoft.Diagnostics.Runtime;
+using Microsoft.DotNet.Interactive;
+using System;
+
+var dumpFilePath = await Kernel.GetInputAsync(
+    "Please provide a memory dump file.",
+    typeHint: "file");
+
+#!csharp
+
+using (var dataTarget = DataTarget.LoadDump(dumpFilePath))
+{
+    foreach (var version in dataTarget.ClrVersions)
+    {
+        Console.WriteLine("Found CLR Version: " + version.Version);
+
+        var runtime = version.CreateRuntime();
+
+        if (!runtime.Heap.CanWalkHeap)
+        {
+            Console.WriteLine("Cannot walk the heap!");
+        }
+        else
+        {
+            var pools = runtime.GetDbConnections();
+
+            pools.Display();
+        }
+    }
+}
