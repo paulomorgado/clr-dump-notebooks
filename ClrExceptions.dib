@@ -1,0 +1,117 @@
+#!meta
+
+{"kernelInfo":{"defaultKernelName":"csharp","items":[{"aliases":[],"languageName":"csharp","name":"csharp"}]}}
+
+#!csharp
+
+#r "nuget: Microsoft.Diagnostics.Runtime, 3.0.0-beta.23214.4"
+
+using System;
+using System.IO;
+using System.Linq;
+using Microsoft.Diagnostics.Runtime;
+using Microsoft.DotNet.Interactive;
+
+#!csharp
+
+using System.Collections.Immutable;
+using System.Text.RegularExpressions;
+
+var cleanDisplayClassRegex = new Regex(@"(^.*)\+\<\>\w+_DisplayClass\w+\+\<\<([^\>]+)\>\w+\>(.*)", RegexOptions.Compiled);
+var cleanMoveNextRegex = new Regex(@"(^.*)\+\<([^\>]+)\>.+\.MoveNext\(\)", RegexOptions.Compiled);
+
+IEnumerable<string> ToDemystifiedStack(ImmutableArray<ClrStackFrame> stackFrames)
+{
+	foreach (var stackFrame in stackFrames)
+	{
+		var stackFrameText = stackFrame.ToString();
+
+		if (!string.IsNullOrEmpty(stackFrameText))
+		{
+			if (stackFrameText.Equals("System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw()", StringComparison.Ordinal))
+			{
+				yield return "throw";
+				continue;
+			}
+			
+			if (stackFrameText.StartsWith("System.Runtime.CompilerServices.TaskAwaiter.ThrowForNonSuccess", StringComparison.Ordinal))
+			{
+				continue;
+			}
+			
+			if (stackFrameText.StartsWith("System.Runtime.CompilerServices.TaskAwaiter.HandleNonSuccessAndDebuggerNotification", StringComparison.Ordinal))
+			{
+				continue;
+			}
+			
+			stackFrameText = cleanDisplayClassRegex.Replace(stackFrameText, "$1<$2>$3");
+			stackFrameText = cleanMoveNextRegex.Replace(stackFrameText, "async $1.$2");
+
+			yield return stackFrameText;
+		}
+	}
+}
+
+#!csharp
+
+foreach (var dumpFilePath in Directory.EnumerateFiles(".", "*.dmp").Order())
+{
+    Console.WriteLine(Path.GetFileName(dumpFilePath));
+    Console.WriteLine();
+
+    using (var dataTarget = DataTarget.LoadDump(dumpFilePath))
+    {
+        foreach (var version in dataTarget.ClrVersions)
+        {
+            var runtime = version.CreateRuntime();
+
+            if (!runtime.Heap.CanWalkHeap)
+            {
+                Console.WriteLine("Cannot walk the heap!");
+            }
+            else
+            {
+                var exceptions = from obj in runtime.Heap.EnumerateObjects()
+                             where obj.IsException
+                             let ex = obj.AsException()
+                             group ex by (type: ex.Type.Name, message: ex.Message, stackTrace: string.Join(Environment.NewLine, ToDemystifiedStack(ex.StackTrace))) into g
+                             orderby g.Key.type, g.Key.message, g.Key.stackTrace
+                             select new
+                             {
+                                Type = g.Key.type,
+                                Message = g.Key.message,
+                                StackTrace = g.Key.stackTrace,
+                                Instances = g,
+                             };
+
+                foreach (var entry in exceptions)
+                {
+                    Console.WriteLine($"         Type: {entry.Type}");
+                    Console.WriteLine($"      Message: {entry.Message}");
+                    Console.WriteLine($"  Stack Trace: {entry.StackTrace}");
+                    Console.WriteLine($"    Instances:");
+
+                    foreach (var ex in entry.Instances)
+                    {
+                        Console.Write("              [");
+                        Console.Write(ex.Thread?.OSThreadId.ToString("x"));
+                        Console.Write("] ");
+                        Console.Write(ex.Address.ToString("x16"));
+
+                        var inner = ex.Inner;
+                        while (inner is not null)
+                        {
+                            Console.Write(" -> ");
+                            Console.Write(inner.Address.ToString("x16"));
+                            inner = inner.Inner;
+                        }
+
+                        Console.WriteLine();
+                    }
+
+                    Console.WriteLine();
+                }
+            }
+        }
+    }
+}
