@@ -4,7 +4,7 @@
 
 #!csharp
 
-#r "nuget: Microsoft.Diagnostics.Runtime, 3.0.0-beta.23165.1"
+#r "nuget: Microsoft.Diagnostics.Runtime, 3.0.0-beta.23177.1"
 
 #!import ClrMdExtensions.csx
 #!import DataAccess.csx
@@ -12,6 +12,8 @@
 using Microsoft.Diagnostics.Runtime;
 using Microsoft.DotNet.Interactive;
 using System;
+
+#!csharp
 
 var dumpFilePath = await Kernel.GetInputAsync(
     "Please provide a memory dump file.",
